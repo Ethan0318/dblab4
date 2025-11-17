@@ -1,0 +1,13 @@
+.DS_Store
+
+.vscode
+.idea
+cmake-build-debug
+
+build
+
+huadb_data
+huadb_test
+
+# history file
+.huadb_history

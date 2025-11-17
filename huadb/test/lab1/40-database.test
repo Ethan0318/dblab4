@@ -1,0 +1,87 @@
+statement ok
+drop database if exists huadb_test_1;
+
+statement ok
+create database huadb_test_1;
+
+statement ok
+create database huadb_test_2;
+
+# Database "huadb_test_1" already exists
+statement error
+create database huadb_test_1;
+
+statement ok
+\c huadb_test_1
+
+statement ok
+\c huadb_test_2
+
+statement ok
+\c huadb_test_1
+
+# No database name
+statement error
+\c
+
+query rowsort
+\l
+----
+system
+huadb
+huadb_test_1
+huadb_test_2
+
+query rowsort
+show databases;
+----
+system
+huadb
+huadb_test_1
+huadb_test_2
+
+query
+\d
+----
+
+query
+show tables;
+----
+
+statement ok
+create table a(id int, gender char(1), name varchar(10), score double);
+
+query
+\d
+----
+a
+
+query
+show tables;
+----
+a
+
+query
+\d a
+----
+id int 4
+gender char 1
+name varchar 10
+score double 8
+
+# Cannot drop the currently open database
+statement error
+drop database huadb_test_1;
+
+# Database "not_exists" does not exist
+statement error
+drop database not_exists;
+
+statement ok
+drop database huadb_test_2;
+
+statement ok
+\c huadb
+
+statement ok
+drop database huadb_test_1;

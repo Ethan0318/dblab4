@@ -1,0 +1,5 @@
+ci:
+  script:
+    - git clone https://gitlab-ci-token:${TEST_REPO_TOKEN}@git.tsinghua.edu.cn/dbtrain/huadb-test.git
+    - cd huadb-test
+    - bash test.sh

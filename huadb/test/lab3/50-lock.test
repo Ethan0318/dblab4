@@ -1,0 +1,305 @@
+statement ok
+create table lock_test(id int);
+
+query
+insert into lock_test values(1), (2), (3);
+----
+3
+
+statement ok C1
+set isolation_level = 'serializable';
+
+statement ok C2
+set isolation_level = 'serializable';
+
+# Test 1: Row lock test: delete/update
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+query C1
+delete from lock_test where id = 1;
+----
+1
+
+# The row with id = 1 has been deleted by C1 so C2 cannot update it
+statement error C2
+update lock_test set id = 5 where id = 1;
+
+statement ok C1
+rollback;
+
+statement ok C2
+rollback;
+
+
+
+# Test 2: Row lock test: update/update
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+query C1
+update lock_test set id = 4 where id = 1;
+----
+1
+
+# The row with id = 1 has been updated by C1 so C2 cannot update it
+statement error C2
+update lock_test set id = 5 where id = 1;
+
+statement ok C1
+rollback;
+
+statement ok C2
+rollback;
+
+statement ok C2
+begin;
+
+query C2
+update lock_test set id = 5 where id = 1;
+----
+1
+
+statement ok C2
+commit;
+
+query
+select * from lock_test;
+----
+2
+3
+5
+
+
+
+# Test 3: IS table lock test
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+# IS lock (C1)
+query C1
+select * from lock_test;
+----
+2
+3
+5
+
+# IS lock
+query C2
+select * from lock_test;
+----
+2
+3
+5
+
+# IX lock
+query C2
+insert into lock_test values(6);
+----
+1
+
+# S lock
+statement ok C2
+lock lock_test in share mode;
+
+# X lock
+statement error C2
+lock lock_test in exclusive mode;
+
+statement ok C1
+rollback;
+
+statement ok C2
+rollback;
+
+
+
+# Test 4: IX table lock test
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+# IX lock (C1)
+query C1
+insert into lock_test values(6);
+----
+1
+
+# IS lock
+query C2
+select * from lock_test;
+----
+2
+3
+5
+
+# IX lock
+query C2
+delete from lock_test where id = 2;
+----
+1
+
+# S lock
+statement error C2
+lock lock_test in share mode;
+
+# X lock
+statement error C2
+lock lock_test in exclusive mode;
+
+statement ok C1
+rollback;
+
+statement ok C2
+rollback;
+
+
+
+# Test 5: S table lock test
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+# S lock (C1)
+statement ok C1
+lock lock_test in share mode;
+
+# IS lock
+query C2
+select * from lock_test;
+----
+2
+3
+5
+
+# S lock
+statement ok C2
+lock lock_test in share mode;
+
+# IX lock
+statement error C2
+update lock_test set id = 6 where id = 2;
+
+# X lock
+statement error C2
+lock lock_test in exclusive mode;
+
+statement ok C1
+rollback;
+
+statement ok C2
+rollback;
+
+
+
+# Test 6: SIX table lock test
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+# S lock (C1)
+statement ok C1
+lock lock_test in share mode;
+
+# SIX lock (C1)
+query C1
+insert into lock_test values(6);
+----
+1
+
+# IS lock
+query C2
+select * from lock_test;
+----
+2
+3
+5
+
+# IX lock
+statement error C2
+update lock_test set id = 6 where id = 2;
+
+# S lock
+statement error C2
+lock lock_test in share mode;
+
+# X lock
+statement error C2
+lock lock_test in exclusive mode;
+
+statement ok C1
+rollback;
+
+query C2
+select * from lock_test;
+----
+2
+3
+5
+
+statement ok C2
+rollback;
+
+
+
+# Test 7: X table lock test
+statement ok C1
+begin;
+
+statement ok C2
+begin;
+
+# X lock (C1)
+statement ok C1
+lock lock_test in exclusive mode;
+
+# IS lock
+statement error C2
+select * from lock_test;
+
+# IX lock
+statement error C2
+insert into lock_test values(6);
+
+# IX lock
+statement error C2
+delete from lock_test where id = 2;
+
+# S lock
+statement error C2
+lock lock_test in share mode;
+
+# X lock
+statement error C2
+lock lock_test in exclusive mode;
+
+statement ok C1
+rollback;
+
+query C2
+select * from lock_test;
+----
+2
+3
+5
+
+statement ok C2
+rollback;
+
+statement ok
+drop table lock_test;

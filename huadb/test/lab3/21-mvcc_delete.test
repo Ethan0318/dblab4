@@ -1,0 +1,68 @@
+# Txn #1 | Txn #2 |
+# -----------------
+# BEGIN  |        |
+# W(X)   |        |
+# R(X)   |        |
+#        | BEGIN  |
+#        | R(X)   |
+# COMMIT |        |
+#        | R(X)   |
+#        | COMMIT |
+# R(X)   |        |
+#        | R(X)   |
+
+statement ok
+create table b_mvcc(id int);
+
+query
+insert into b_mvcc values(1);
+----
+1
+
+statement ok C1
+set isolation_level = 'repeatable_read';
+
+statement ok C2
+set isolation_level = 'repeatable_read';
+
+statement ok C1
+begin;
+
+query C1
+delete from b_mvcc where id = 1;
+----
+1
+
+query C1
+select * from b_mvcc;
+----
+
+statement ok C2
+begin;
+
+query C2
+select * from b_mvcc;
+----
+1
+
+statement ok C1
+commit;
+
+query C2
+select * from b_mvcc;
+----
+1
+
+statement ok C2
+commit;
+
+query C1
+select * from b_mvcc;
+----
+
+query C2
+select * from b_mvcc;
+----
+
+statement ok
+drop table b_mvcc;

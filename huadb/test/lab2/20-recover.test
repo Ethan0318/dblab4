@@ -1,0 +1,138 @@
+statement ok
+create table recover(id int, info varchar(10));
+
+query
+insert into recover values(1, 'info1'), (2, 'info2');
+----
+2
+
+query rowsort
+select * from recover;
+----
+1 info1
+2 info2
+
+# Restart to ensure data is written to disk
+statement ok
+restart;
+
+query rowsort
+select * from recover;
+----
+1 info1
+2 info2
+
+# Insert recovery test
+query
+insert into recover values(3, 'info3');
+----
+1
+
+query rowsort
+select * from recover;
+----
+1 info1
+2 info2
+3 info3
+
+statement ok
+crash;
+
+statement ok
+restart;
+
+query rowsort
+select * from recover;
+----
+1 info1
+2 info2
+3 info3
+
+# Delete recovery test
+query
+delete from recover where id = 1;
+----
+1
+
+query rowsort
+select * from recover;
+----
+2 info2
+3 info3
+
+statement ok
+crash;
+
+statement ok
+restart;
+
+query rowsort
+select * from recover;
+----
+2 info2
+3 info3
+
+# Update recovery test
+query
+update recover set id = 3 where id < 3;
+----
+1
+
+query rowsort
+select * from recover;
+----
+3 info2
+3 info3
+
+statement ok
+crash;
+
+statement ok
+restart;
+
+query rowsort
+select * from recover;
+----
+3 info2
+3 info3
+
+# New page recovery test
+query
+insert into recover values(4, 'info4'), (5, 'info5'), (6, 'info6'), (7, 'info7'), (8, 'info8'), (9, 'info9'), (10, 'info10');
+----
+7
+
+query rowsort
+select * from recover;
+----
+3 info2
+3 info3
+4 info4
+5 info5
+6 info6
+7 info7
+8 info8
+9 info9
+10 info10
+
+statement ok
+crash;
+
+statement ok
+restart;
+
+query rowsort
+select * from recover;
+----
+3 info2
+3 info3
+4 info4
+5 info5
+6 info6
+7 info7
+8 info8
+9 info9
+10 info10
+
+statement ok
+drop table recover;
