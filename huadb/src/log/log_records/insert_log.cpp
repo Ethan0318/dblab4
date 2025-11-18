@@ -1,4 +1,5 @@
 #include "log/log_records/insert_log.h"
+#include "table/table_page.h"
 
 namespace huadb {
 
