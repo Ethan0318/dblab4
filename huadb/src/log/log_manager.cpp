@@ -392,12 +392,10 @@ void LogManager::Redo() {
         break;
       }
       case LogType::NEW_PAGE: {
-        // NEW_PAGE 逻辑修改的是 prev_page 的 next 指针
+        // 这里要确保“新页”本身也能在恢复时被创建/初始化
         auto nl = std::dynamic_pointer_cast<NewPageLog>(log);
-        if (nl->GetPrevPageId() != NULL_PAGE_ID) {
-          page_key = {nl->GetOid(), nl->GetPrevPageId()};
-          has_page = true;
-        }
+        page_key = {nl->GetOid(), nl->GetPageId()};
+        has_page = true;
         break;
       }
       default:
