@@ -1,4 +1,6 @@
 #include "log/log_manager.h"
+#include <memory>
+#include "table/table_page.h"
 
 #include "common/exceptions.h"
 #include "log/log_records/log_records.h"
