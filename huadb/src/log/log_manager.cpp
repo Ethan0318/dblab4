@@ -342,6 +342,17 @@ void LogManager::Analyze() {
         }
         break;
       }
+      case LogType::END_CHECKPOINT: {
+        // 读取检查点中的 ATT/DPT
+        auto ecl = std::dynamic_pointer_cast<EndCheckpointLog>(log);
+        att_ = ecl->GetATT();
+        dpt_ = ecl->GetDPT();
+        // 用检查点内的活跃事务更新 max_xid
+        for (const auto &[xid, _] : att_) {
+          max_xid = std::max(max_xid, xid);
+        }
+        break;
+      }
 
       default:
         break;
