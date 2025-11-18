@@ -359,15 +359,22 @@ void LogManager::Redo() {
         if (nl->GetPrevPageId() != NULL_PAGE_ID) {
           TablePageid prev{nl->GetOid(), nl->GetPrevPageId()};
           auto it = dpt_.find(prev);
-          if (it != dpt_.end() && log->GetLSN() >= it->second) {
-            auto db_oid = catalog_->GetDatabaseOid(nl->GetOid());
-            auto prev_page = buffer_pool_->GetPage(db_oid, nl->GetOid(), nl->GetPrevPageId());
-            auto prev_tp = std::make_unique<TablePage>(prev_page);
-            if (log->GetLSN() > prev_tp->GetPageLSN()) {
-              log->Redo(*buffer_pool_, *catalog_, *this);
-              IncrementRedoCount();
-            }
+        if (it != dpt_.end() && log->GetLSN() >= it->second) {
+          auto db_oid = catalog_->GetDatabaseOid(nl->GetOid());
+          std::shared_ptr<Page> prev_page;
+          try {
+            prev_page = buffer_pool_->GetPage(db_oid, nl->GetOid(), nl->GetPrevPageId());
+          } catch (DbException &) {
+            prev_page = buffer_pool_->NewPage(db_oid, nl->GetOid(), nl->GetPrevPageId());
+            auto tmp = std::make_unique<TablePage>(prev_page);
+            tmp->Init();
           }
+          auto prev_tp = std::make_unique<TablePage>(prev_page);
+          if (log->GetLSN() > prev_tp->GetPageLSN()) {
+            log->Redo(*buffer_pool_, *catalog_, *this);
+            IncrementRedoCount();
+          }
+        }
         }
         // 新页也可能需要重做（尤其在 Create 时）
         page_key = {nl->GetOid(), nl->GetPageId()};
@@ -382,7 +389,14 @@ void LogManager::Redo() {
       auto it = dpt_.find(page_key);
       if (it != dpt_.end() && log->GetLSN() >= it->second) {
         auto db_oid = catalog_->GetDatabaseOid(page_key.table_oid_);
-        auto page = buffer_pool_->GetPage(db_oid, page_key.table_oid_, page_key.page_id_);
+        std::shared_ptr<Page> page;
+        try {
+          page = buffer_pool_->GetPage(db_oid, page_key.table_oid_, page_key.page_id_);
+        } catch (DbException &) {
+          page = buffer_pool_->NewPage(db_oid, page_key.table_oid_, page_key.page_id_);
+          auto tmp = std::make_unique<TablePage>(page);
+          tmp->Init();
+        }
         auto tp = std::make_unique<TablePage>(page);
         if (log->GetLSN() > tp->GetPageLSN()) {
           log->Redo(*buffer_pool_, *catalog_, *this);
