@@ -45,7 +45,7 @@ void NewPageLog::Undo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log
   if (prev_page_id_ != NULL_PAGE_ID) {
     auto prev_page = buffer_pool.GetPage(db_oid, oid_, prev_page_id_);
     auto prev_table_page = std::make_unique<TablePage>(prev_page);
-    prev_table_page->SetNextPageId(prev_page_id_);
+    prev_table_page->SetNextPageId(NULL_PAGE_ID);
   }
 }
 
