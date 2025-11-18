@@ -29,6 +29,10 @@ void TablePage::Init() {
 
 slotid_t TablePage::InsertRecord(std::shared_ptr<Record> record, xid_t xid, cid_t cid) {
   // LAB 1 BEGIN
+  record->SetXmin(xid);
+  record->SetCid(cid);
+  record->SetXmax(NULL_XID);
+  record->SetDeleted(false);
   slotid_t slot_id = GetRecordCount();
   Slot *slot = reinterpret_cast<Slot *>(page_data_ + *lower_);
   slot->size_ = record->GetSize();
@@ -48,6 +52,7 @@ void TablePage::DeleteRecord(slotid_t slot_id, xid_t xid) {
   Record r;
   r.DeserializeHeaderFrom(data);
   r.SetDeleted(true);
+  r.SetXmax(xid);
   r.SerializeHeaderTo(data);
   page_->SetDirty();
 }
@@ -74,6 +79,7 @@ void TablePage::UndoDeleteRecord(slotid_t slot_id) {
   Record r;
   r.DeserializeHeaderFrom(data);
   r.SetDeleted(false);
+  r.SetXmax(NULL_XID);
   r.SerializeHeaderTo(data);
   page_->SetDirty();
 }

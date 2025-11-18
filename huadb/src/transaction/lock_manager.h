@@ -1,5 +1,10 @@
 #pragma once
 
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include "common/types.h"
 
 namespace huadb {
@@ -36,6 +41,10 @@ class LockManager {
   LockType Upgrade(LockType self, LockType other) const;
 
   DeadlockType deadlock_type_ = DeadlockType::NONE;
+  // 当前已加锁的对象，键为对象标识（表或行），值为持有该锁的事务及其锁类型
+  std::unordered_map<std::string, std::unordered_map<xid_t, LockType>> lock_table_;
+  // 事务到其持有锁对象键的映射，用于在提交/回滚时快速释放
+  std::unordered_map<xid_t, std::unordered_set<std::string>> txn_locks_;
 };
 
 }  // namespace huadb
