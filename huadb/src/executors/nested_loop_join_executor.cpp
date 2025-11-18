@@ -10,14 +10,36 @@ NestedLoopJoinExecutor::NestedLoopJoinExecutor(ExecutorContext &context,
 void NestedLoopJoinExecutor::Init() {
   children_[0]->Init();
   children_[1]->Init();
+  left_record_ = nullptr;
 }
 
 std::shared_ptr<Record> NestedLoopJoinExecutor::Next() {
-  // 从 NestedLoopJoinOperator 中获取连接条件
-  // 使用 OperatorExpression 的 EvaluateJoin 函数判断是否满足 join 条件
-  // 使用 Record 的 Append 函数进行记录的连接
-  // LAB 4 BEGIN
-  return nullptr;
+  while (true) {
+    if (!left_record_) {
+      left_record_ = children_[0]->Next();
+      if (!left_record_) {
+        return nullptr;
+      }
+      // restart right iterator for the new left tuple
+      children_[1]->Init();
+    }
+
+    while (auto right_record = children_[1]->Next()) {
+      bool matched = true;
+      if (plan_->join_condition_) {
+        auto cond = plan_->join_condition_->EvaluateJoin(left_record_, right_record);
+        matched = !cond.IsNull() && cond.GetValue<bool>();
+      }
+      if (matched) {
+        auto result = std::make_shared<Record>(*left_record_);
+        result->Append(*right_record);
+        return result;
+      }
+    }
+
+    // No match for current left tuple, move to next.
+    left_record_ = nullptr;
+  }
 }
 
 }  // namespace huadb

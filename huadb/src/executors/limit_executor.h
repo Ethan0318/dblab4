@@ -13,6 +13,10 @@ class LimitExecutor : public Executor {
 
  private:
   std::shared_ptr<const LimitOperator> plan_;
+  // Number of tuples already produced.
+  size_t count_ = 0;
+  // Whether offset tuples have been skipped.
+  bool initialized_ = false;
 };
 
 }  // namespace huadb
