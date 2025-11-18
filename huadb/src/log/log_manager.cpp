@@ -286,32 +286,53 @@ void LogManager::Analyze() {
     max_xid = std::max(max_xid, log->GetXid());
     switch (log->GetType()) {
       case LogType::BEGIN:
+        // ��ʼ����־����� ATT ��¼��һ����־�� lsn
         att_[log->GetXid()] = log->GetLSN();
         break;
       case LogType::COMMIT:
       case LogType::ROLLBACK:
+        // �Ѿ��ύ��/�ع�������Ӧ�ó� ATT
         att_.erase(log->GetXid());
         break;
       case LogType::INSERT: {
         auto il = std::dynamic_pointer_cast<InsertLog>(log);
         TablePageid tpid{il->GetOid(), il->GetPageId()};
-        if (dpt_.find(tpid) == dpt_.end()) dpt_[tpid] = il->GetLSN();
+        if (dpt_.find(tpid) == dpt_.end()) {
+          dpt_[tpid] = il->GetLSN();
+        }
+        // ��������־Ҳ��Ҫ���� ATT �е����һ�� lsn
+        if (log->GetXid() != NULL_XID && log->GetXid() != DDL_XID) {
+          att_[log->GetXid()] = log->GetLSN();
+        }
         break;
       }
       case LogType::DELETE: {
         auto dl = std::dynamic_pointer_cast<DeleteLog>(log);
         TablePageid tpid{dl->GetOid(), dl->GetPageId()};
-        if (dpt_.find(tpid) == dpt_.end()) dpt_[tpid] = dl->GetLSN();
+        if (dpt_.find(tpid) == dpt_.end()) {
+          dpt_[tpid] = dl->GetLSN();
+        }
+        if (log->GetXid() != NULL_XID && log->GetXid() != DDL_XID) {
+          att_[log->GetXid()] = log->GetLSN();
+        }
         break;
       }
       case LogType::NEW_PAGE: {
         auto nl = std::dynamic_pointer_cast<NewPageLog>(log);
         if (nl->GetPrevPageId() != NULL_PAGE_ID) {
           TablePageid prev{nl->GetOid(), nl->GetPrevPageId()};
-          if (dpt_.find(prev) == dpt_.end()) dpt_[prev] = nl->GetLSN();
+          if (dpt_.find(prev) == dpt_.end()) {
+            dpt_[prev] = nl->GetLSN();
+          }
         }
         TablePageid cur{nl->GetOid(), nl->GetPageId()};
-        if (dpt_.find(cur) == dpt_.end()) dpt_[cur] = nl->GetLSN();
+        if (dpt_.find(cur) == dpt_.end()) {
+          dpt_[cur] = nl->GetLSN();
+        }
+        // DDL_XID �Żᱻʹ�õ� NEW_PAGE ��־����ͨ�û�������Ҫ��� ATT
+        if (log->GetXid() != NULL_XID && log->GetXid() != DDL_XID) {
+          att_[log->GetXid()] = log->GetLSN();
+        }
         break;
       }
       default:
