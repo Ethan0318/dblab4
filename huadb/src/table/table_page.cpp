@@ -68,19 +68,33 @@ std::shared_ptr<Record> TablePage::GetRecord(Rid rid, const ColumnList &column_l
 }
 
 void TablePage::UndoDeleteRecord(slotid_t slot_id) {
-  // 修改 undo delete 的逻辑
-  // LAB 3 BEGIN
-
-  // 清除记录的删除标记
-  // 将页面设为 dirty
   // LAB 2 BEGIN
+  Slot *slot = slots_ + slot_id;
+  char *data = reinterpret_cast<char *>(page_data_ + slot->offset_);
+  Record r;
+  r.DeserializeHeaderFrom(data);
+  r.SetDeleted(false);
+  r.SerializeHeaderTo(data);
+  page_->SetDirty();
 }
 
 void TablePage::RedoInsertRecord(slotid_t slot_id, char *raw_record, db_size_t page_offset, db_size_t record_size) {
-  // 将 raw_record 写入 page data
-  // 注意维护 lower 和 upper 指针，以及 slots 数组
-  // 将页面设为 dirty
   // LAB 2 BEGIN
+  // 写入记录内容
+  memcpy(page_data_ + page_offset, raw_record, record_size);
+  // 设置槽信息
+  Slot *slot = reinterpret_cast<Slot *>(page_data_ + PAGE_HEADER_SIZE) + slot_id;
+  slot->offset_ = page_offset;
+  slot->size_ = record_size;
+  // 维护 lower 与 upper
+  db_size_t expected_lower = PAGE_HEADER_SIZE + (slot_id + 1) * sizeof(Slot);
+  if (*lower_ < expected_lower) {
+    *lower_ = expected_lower;
+  }
+  if (*upper_ > page_offset) {
+    *upper_ = page_offset;
+  }
+  page_->SetDirty();
 }
 
 db_size_t TablePage::GetRecordCount() const { return (*lower_ - PAGE_HEADER_SIZE) / sizeof(Slot); }

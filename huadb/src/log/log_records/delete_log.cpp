@@ -43,6 +43,10 @@ void DeleteLog::Undo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log_
   // 恢复删除的记录
   // 通过 catalog_ 获取 db_oid
   // LAB 2 BEGIN
+  auto db_oid = catalog.GetDatabaseOid(oid_);
+  auto page = buffer_pool.GetPage(db_oid, oid_, page_id_);
+  auto table_page = std::make_unique<TablePage>(page);
+  table_page->UndoDeleteRecord(slot_id_);
 }
 
 void DeleteLog::Redo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log_manager) {
@@ -52,6 +56,11 @@ void DeleteLog::Redo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log_
   }
   // 根据日志信息进行重做
   // LAB 2 BEGIN
+  auto db_oid = catalog.GetDatabaseOid(oid_);
+  auto page = buffer_pool.GetPage(db_oid, oid_, page_id_);
+  auto table_page = std::make_unique<TablePage>(page);
+  table_page->DeleteRecord(slot_id_, xid_);
+  table_page->SetPageLSN(GetLSN());
 }
 
 oid_t DeleteLog::GetOid() const { return oid_; }

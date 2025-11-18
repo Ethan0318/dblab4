@@ -40,6 +40,12 @@ std::shared_ptr<NewPageLog> NewPageLog::DeserializeFrom(lsn_t lsn, const char *d
 
 void NewPageLog::Undo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log_manager, lsn_t undo_next_lsn) {
   // LAB 2 BEGIN
+  auto db_oid = catalog.GetDatabaseOid(oid_);
+  if (prev_page_id_ != NULL_PAGE_ID) {
+    auto prev_page = buffer_pool.GetPage(db_oid, oid_, prev_page_id_);
+    auto prev_table_page = std::make_unique<TablePage>(prev_page);
+    prev_table_page->SetNextPageId(prev_page_id_);
+  }
 }
 
 void NewPageLog::Redo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log_manager) {
@@ -49,6 +55,13 @@ void NewPageLog::Redo(BufferPool &buffer_pool, Catalog &catalog, LogManager &log
   }
   // 根据日志信息进行重做
   // LAB 2 BEGIN
+  auto db_oid = catalog.GetDatabaseOid(oid_);
+  if (prev_page_id_ != NULL_PAGE_ID) {
+    auto prev_page = buffer_pool.GetPage(db_oid, oid_, prev_page_id_);
+    auto prev_table_page = std::make_unique<TablePage>(prev_page);
+    prev_table_page->SetNextPageId(page_id_);
+    prev_table_page->SetPageLSN(GetLSN());
+  }
 }
 
 oid_t NewPageLog::GetOid() const { return oid_; }

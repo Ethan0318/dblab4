@@ -41,6 +41,10 @@ Rid Table::InsertRecord(std::shared_ptr<Record> record, xid_t xid, cid_t cid, bo
     new_table_page->Init();
     first_page_id_ = page_id;
     table_page = std::move(new_table_page);
+    if (write_log) {
+      lsn_t nlsn = log_manager_.AppendNewPageLog(xid, oid_, NULL_PAGE_ID, page_id);
+      table_page->SetPageLSN(nlsn);
+    }
   } else {
     page_id = first_page_id_;
     page = buffer_pool_.GetPage(db_oid_, oid_, page_id);
@@ -52,16 +56,33 @@ Rid Table::InsertRecord(std::shared_ptr<Record> record, xid_t xid, cid_t cid, bo
     }
     if (table_page->GetFreeSpaceSize() < record->GetSize()) {
       pageid_t new_pid = page_id + 1;
+      pageid_t prev_next = table_page->GetNextPageId();
       table_page->SetNextPageId(new_pid);
+      if (write_log) {
+        lsn_t nlsn = log_manager_.AppendNewPageLog(xid, oid_, prev_next, new_pid);
+        table_page->SetPageLSN(nlsn);
+      }
       auto new_page = buffer_pool_.NewPage(db_oid_, oid_, new_pid);
       auto new_table_page = std::make_unique<TablePage>(new_page);
       new_table_page->Init();
       table_page = std::move(new_table_page);
       page_id = new_pid;
+      if (write_log) {
+        lsn_t nlsn2 = log_manager_.AppendNewPageLog(xid, oid_, NULL_PAGE_ID, new_pid);
+        table_page->SetPageLSN(nlsn2);
+      }
     }
   }
 
   slotid_t slot_id = table_page->InsertRecord(record, xid, cid);
+  if (write_log) {
+    db_size_t offset = table_page->GetUpper();
+    db_size_t size = record->GetSize();
+    auto page_ptr = buffer_pool_.GetPage(db_oid_, oid_, page_id);
+    char *raw = page_ptr->GetData() + offset;
+    lsn_t ilsn = log_manager_.AppendInsertLog(xid, oid_, page_id, slot_id, offset, size, raw);
+    table_page->SetPageLSN(ilsn);
+  }
   return {page_id, slot_id};
 }
 
@@ -75,6 +96,10 @@ void Table::DeleteRecord(const Rid &rid, xid_t xid, bool write_log) {
   auto page = buffer_pool_.GetPage(db_oid_, oid_, rid.page_id_);
   auto table_page = std::make_unique<TablePage>(page);
   table_page->DeleteRecord(rid.slot_id_, xid);
+  if (write_log) {
+    lsn_t dlsn = log_manager_.AppendDeleteLog(xid, oid_, rid.page_id_, rid.slot_id_);
+    table_page->SetPageLSN(dlsn);
+  }
 }
 
 Rid Table::UpdateRecord(const Rid &rid, xid_t xid, cid_t cid, std::shared_ptr<Record> record, bool write_log) {
