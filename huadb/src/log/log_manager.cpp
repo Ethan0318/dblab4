@@ -257,8 +257,8 @@ void LogManager::Flush(lsn_t lsn) {
 }
 
 void LogManager::Analyze() {
-  // 恢复 Master Record 等元信息
-  // 恢复故障时正在使用的数据库
+  // 恢复 Master Record 中元信息
+  // 恢复下次启动时要使用的日志起始 LSN
   if (disk_.FileExists(NEXT_LSN_NAME)) {
     std::ifstream in(NEXT_LSN_NAME);
     lsn_t next_lsn;
@@ -274,9 +274,8 @@ void LogManager::Analyze() {
     std::ifstream in(MASTER_RECORD_NAME);
     in >> checkpoint_lsn;
   }
-  // 根据 Checkpoint 日志恢复脏页表、活跃事务表等元信息
-  // 必要时调用 transaction_manager_.SetNextXid 来恢复事务 id
-  // LAB 2 BEGIN
+
+  // 从 checkpoint_lsn 开始扫描日志，重建 ATT 和 DPT
   xid_t max_xid = FIRST_XID;
   lsn_t scan_lsn = checkpoint_lsn;
   while (scan_lsn <= flushed_lsn_) {
@@ -284,28 +283,33 @@ void LogManager::Analyze() {
     disk_.ReadLog(static_cast<uint32_t>(scan_lsn), static_cast<uint32_t>(MAX_LOG_SIZE), buf.get());
     auto log = LogRecord::DeserializeFrom(scan_lsn, buf.get());
     max_xid = std::max(max_xid, log->GetXid());
+
     switch (log->GetType()) {
       case LogType::BEGIN:
-        // ��ʼ����־����� ATT ��¼��һ����־�� lsn
+        // 事务开始：加入 ATT，最后一条日志 LSN 先记为 BEGIN 的 LSN
         att_[log->GetXid()] = log->GetLSN();
         break;
+
       case LogType::COMMIT:
       case LogType::ROLLBACK:
-        // �Ѿ��ύ��/�ع�������Ӧ�ó� ATT
+        // 事务结束：从 ATT 中移除
         att_.erase(log->GetXid());
         break;
+
       case LogType::INSERT: {
         auto il = std::dynamic_pointer_cast<InsertLog>(log);
         TablePageid tpid{il->GetOid(), il->GetPageId()};
+        // DPT：第一次遇到这个页时记录 rec_lsn
         if (dpt_.find(tpid) == dpt_.end()) {
           dpt_[tpid] = il->GetLSN();
         }
-        // ��������־Ҳ��Ҫ���� ATT �е����һ�� lsn
+        // 活跃事务的最后一条日志 LSN
         if (log->GetXid() != NULL_XID && log->GetXid() != DDL_XID) {
           att_[log->GetXid()] = log->GetLSN();
         }
         break;
       }
+
       case LogType::DELETE: {
         auto dl = std::dynamic_pointer_cast<DeleteLog>(log);
         TablePageid tpid{dl->GetOid(), dl->GetPageId()};
@@ -317,48 +321,61 @@ void LogManager::Analyze() {
         }
         break;
       }
+
       case LogType::NEW_PAGE: {
         auto nl = std::dynamic_pointer_cast<NewPageLog>(log);
+        // 旧页可能也变脏
         if (nl->GetPrevPageId() != NULL_PAGE_ID) {
           TablePageid prev{nl->GetOid(), nl->GetPrevPageId()};
           if (dpt_.find(prev) == dpt_.end()) {
             dpt_[prev] = nl->GetLSN();
           }
         }
+        // 新页也可能脏
         TablePageid cur{nl->GetOid(), nl->GetPageId()};
         if (dpt_.find(cur) == dpt_.end()) {
           dpt_[cur] = nl->GetLSN();
         }
-        // DDL_XID �Żᱻʹ�õ� NEW_PAGE ��־����ͨ�û�������Ҫ��� ATT
+        // NEW_PAGE 对普通事务也要更新 ATT；DDL_XID/NULL_XID 不算事务
         if (log->GetXid() != NULL_XID && log->GetXid() != DDL_XID) {
           att_[log->GetXid()] = log->GetLSN();
         }
         break;
       }
+
       default:
         break;
     }
+
     scan_lsn += log->GetSize();
   }
+
+  // 恢复 TransactionManager 中的 next_xid
   transaction_manager_.SetNextXid(max_xid + 1);
 }
 
+
 void LogManager::Redo() {
-  // 正序读取日志，调用日志记录的 Redo 函数（ARIES 三条件）
-  // LAB 2 BEGIN
+  // ARIES Redo：从 DPT 最小 rec_lsn 开始，带三条件重做
   if (dpt_.empty()) {
     return;
   }
+
+  // 找到所有脏页中最小的 rec_lsn
   lsn_t start_lsn = flushed_lsn_;
-  for (const auto &[tp, rec] : dpt_) {
-    if (rec < start_lsn) start_lsn = rec;
+  for (const auto &[tp, rec_lsn] : dpt_) {
+    if (rec_lsn < start_lsn) {
+      start_lsn = rec_lsn;
+    }
   }
+
   lsn_t scan_lsn = start_lsn;
   while (scan_lsn <= flushed_lsn_) {
     auto buf = std::make_unique<char[]>(MAX_LOG_SIZE);
     disk_.ReadLog(static_cast<uint32_t>(scan_lsn), static_cast<uint32_t>(MAX_LOG_SIZE), buf.get());
     auto log = LogRecord::DeserializeFrom(scan_lsn, buf.get());
 
+    // 找出这条日志对应的“页”
     TablePageid page_key{};
     bool has_page = false;
     switch (log->GetType()) {
@@ -375,31 +392,12 @@ void LogManager::Redo() {
         break;
       }
       case LogType::NEW_PAGE: {
+        // NEW_PAGE 逻辑修改的是 prev_page 的 next 指针
         auto nl = std::dynamic_pointer_cast<NewPageLog>(log);
-        // 针对 prev_page 的链接更新进行重做
         if (nl->GetPrevPageId() != NULL_PAGE_ID) {
-          TablePageid prev{nl->GetOid(), nl->GetPrevPageId()};
-          auto it = dpt_.find(prev);
-        if (it != dpt_.end() && log->GetLSN() >= it->second) {
-          auto db_oid = catalog_->GetDatabaseOid(nl->GetOid());
-          std::shared_ptr<Page> prev_page;
-          try {
-            prev_page = buffer_pool_->GetPage(db_oid, nl->GetOid(), nl->GetPrevPageId());
-          } catch (DbException &) {
-            prev_page = buffer_pool_->NewPage(db_oid, nl->GetOid(), nl->GetPrevPageId());
-            auto tmp = std::make_unique<TablePage>(prev_page);
-            tmp->Init();
-          }
-          auto prev_tp = std::make_unique<TablePage>(prev_page);
-          if (log->GetLSN() > prev_tp->GetPageLSN()) {
-            log->Redo(*buffer_pool_, *catalog_, *this);
-            IncrementRedoCount();
-          }
+          page_key = {nl->GetOid(), nl->GetPrevPageId()};
+          has_page = true;
         }
-        }
-        // 新页也可能需要重做（尤其在 Create 时）
-        page_key = {nl->GetOid(), nl->GetPageId()};
-        has_page = true;
         break;
       }
       default:
@@ -408,20 +406,26 @@ void LogManager::Redo() {
 
     if (has_page) {
       auto it = dpt_.find(page_key);
-      if (it != dpt_.end() && log->GetLSN() >= it->second) {
-        auto db_oid = catalog_->GetDatabaseOid(page_key.table_oid_);
-        std::shared_ptr<Page> page;
-        try {
-          page = buffer_pool_->GetPage(db_oid, page_key.table_oid_, page_key.page_id_);
-        } catch (DbException &) {
-          page = buffer_pool_->NewPage(db_oid, page_key.table_oid_, page_key.page_id_);
-          auto tmp = std::make_unique<TablePage>(page);
-          tmp->Init();
-        }
-        auto tp = std::make_unique<TablePage>(page);
-        if (log->GetLSN() > tp->GetPageLSN()) {
-          log->Redo(*buffer_pool_, *catalog_, *this);
-          IncrementRedoCount();
+      // 条件 1：页不在 DPT → 跳过
+      if (it != dpt_.end()) {
+        // 条件 2：日志 LSN < rec_lsn → 跳过
+        if (log->GetLSN() >= it->second) {
+          auto db_oid = catalog_->GetDatabaseOid(page_key.table_oid_);
+          std::shared_ptr<Page> page;
+          try {
+            page = buffer_pool_->GetPage(db_oid, page_key.table_oid_, page_key.page_id_);
+          } catch (DbException &) {
+            // 页文件不存在时，恢复时创建并初始化一个空页
+            page = buffer_pool_->NewPage(db_oid, page_key.table_oid_, page_key.page_id_);
+            auto tp = std::make_unique<TablePage>(page);
+            tp->Init();
+          }
+          auto tp = std::make_unique<TablePage>(page);
+          // 条件 3：日志 LSN <= page_lsn → 跳过
+          if (log->GetLSN() > tp->GetPageLSN()) {
+            log->Redo(*buffer_pool_, *catalog_, *this);
+            IncrementRedoCount();
+          }
         }
       }
     }
@@ -429,6 +433,7 @@ void LogManager::Redo() {
     scan_lsn += log->GetSize();
   }
 }
+
 
 void LogManager::Undo() {
   // 根据活跃事务表，将所有活跃事务回滚
