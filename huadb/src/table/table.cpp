@@ -56,10 +56,9 @@ Rid Table::InsertRecord(std::shared_ptr<Record> record, xid_t xid, cid_t cid, bo
     }
     if (table_page->GetFreeSpaceSize() < record->GetSize()) {
       pageid_t new_pid = page_id + 1;
-      pageid_t prev_next = table_page->GetNextPageId();
       table_page->SetNextPageId(new_pid);
       if (write_log) {
-        lsn_t nlsn = log_manager_.AppendNewPageLog(xid, oid_, prev_next, new_pid);
+        lsn_t nlsn = log_manager_.AppendNewPageLog(xid, oid_, page_id, new_pid);
         table_page->SetPageLSN(nlsn);
       }
       auto new_page = buffer_pool_.NewPage(db_oid_, oid_, new_pid);
@@ -67,10 +66,6 @@ Rid Table::InsertRecord(std::shared_ptr<Record> record, xid_t xid, cid_t cid, bo
       new_table_page->Init();
       table_page = std::move(new_table_page);
       page_id = new_pid;
-      if (write_log) {
-        lsn_t nlsn2 = log_manager_.AppendNewPageLog(xid, oid_, NULL_PAGE_ID, new_pid);
-        table_page->SetPageLSN(nlsn2);
-      }
     }
   }
 
